@@ -1,0 +1,87 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-test-scan:
+    runs-on: ubuntu-latest
+
+    services:
+      docker:
+        image: docker:24.0.7
+        options: --privileged
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ---------- Linting ----------
+      - name: Lint backend
+        run: |
+          cd backend
+          npm ci
+          npm run lint || true  # Remove '|| true' if you want to fail on lint errors
+
+      - name: Lint frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run lint || true
+
+      # ---------- Dependency Vulnerability Scan ----------
+      - name: Audit backend npm dependencies
+        run: |
+          cd backend
+          npm audit --audit-level=high || true
+
+      - name: Audit frontend npm dependencies
+        run: |
+          cd frontend
+          npm audit --audit-level=high || true
+
+      # ---------- Docker Build ----------
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        run: docker build -t backend-app ./backend
+
+      - name: Build frontend image
+        run: docker build -t frontend-app ./frontend
+
+      # ---------- Docker Image Vulnerability Scan ----------
+      - name: Scan backend image for vulnerabilities
+        uses: aquasecurity/trivy-action@v0.19.1
+        with:
+          image-ref: backend-app
+
+      - name: Scan frontend image for vulnerabilities
+        uses: aquasecurity/trivy-action@v0.19.1
+        with:
+          image-ref: frontend-app
+
+      # ---------- Docker Compose Smoke Test ----------
+      - name: Compose up (smoke test)
+        run: docker compose up -d --build
+
+      - name: Wait for backend to be healthy
+        run: |
+          for i in {1..10}; do
+            if curl -f http://localhost:3001/api/health; then
+              echo "Backend healthy!"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Backend healthcheck failed"
+          docker compose logs
+          exit 1
+
+      # ---------- Cleanup ----------
+      - name: Compose down
+        if: always()
+        run: docker compose down -v
