@@ -55,12 +55,12 @@ jobs:
 
       # ---------- Docker Image Vulnerability Scan ----------
       - name: Scan backend image for vulnerabilities
-        uses: aquasecurity/trivy-action@v0.31.0
+        uses: aquasecurity/trivy-action@v0.26.0
         with:
           image-ref: backend-app
 
       - name: Scan frontend image for vulnerabilities
-        uses: aquasecurity/trivy-action@v0.31.0
+        uses: aquasecurity/trivy-action@v0.26.0
         with:
           image-ref: frontend-app
 
