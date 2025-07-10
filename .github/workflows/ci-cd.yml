@@ -1,4 +1,4 @@
-name: CI/CD Pipeline
+name: CI Pipeline
 
 on:
   push:
@@ -24,7 +24,7 @@ jobs:
         run: |
           cd backend
           npm ci
-          npm run lint || true  # Remove '|| true' if you want to fail on lint errors
+          npm run lint || true  # Remove '|| true' to fail on lint errors
 
       - name: Lint frontend
         run: |
@@ -48,21 +48,21 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build backend image
-        run: docker build -t backend-app ./backend
+        run: docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/backend-app:${{ github.run_id }} ./backend
 
       - name: Build frontend image
-        run: docker build -t frontend-app ./frontend
+        run: docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/frontend-app:${{ github.run_id }} ./frontend
 
       # ---------- Docker Image Vulnerability Scan ----------
       - name: Scan backend image for vulnerabilities
         uses: aquasecurity/trivy-action@0.31.0
         with:
-          image-ref: backend-app
+          image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/backend-app:${{ github.run_id }}
 
       - name: Scan frontend image for vulnerabilities
         uses: aquasecurity/trivy-action@0.31.0
         with:
-          image-ref: frontend-app
+          image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/frontend-app:${{ github.run_id }}
 
       # ---------- Docker Compose Smoke Test ----------
       - name: Compose up (smoke test)
@@ -81,7 +81,44 @@ jobs:
           docker compose logs
           exit 1
 
+      # ---------- DockerHub Login & Push ----------
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push backend image to DockerHub
+        run: docker push ${{ secrets.DOCKERHUB_USERNAME }}/backend-app:${{ github.run_id }}
+
+      - name: Push frontend image to DockerHub
+        run: docker push ${{ secrets.DOCKERHUB_USERNAME }}/frontend-app:${{ github.run_id }}
+
       # ---------- Cleanup ----------
       - name: Compose down
         if: always()
         run: docker compose down -v
+
+  update-newtag-in-helm-chart:
+    runs-on: ubuntu-latest
+    needs: build-test-scan
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.TOKEN }}
+
+      - name: Update image tag in backend and frontend Helm values
+        run: |
+          sed -i 's/tag: .*/tag: "${{ github.run_id }}"/' helm/gym-web-app-chart/charts/backend/values.yaml
+          sed -i 's/tag: .*/tag: "${{ github.run_id }}"/' helm/gym-web-app-chart/charts/frontend/values.yaml
+
+      - name: Commit and push changes
+        run: |
+          git config --global user.email "maryjaneenechukwu@gmail.com"
+          git config --global user.name "Maryjane Enechukwu"
+          git add helm/gym-web-app-chart/charts/backend/values.yaml
+          git add helm/gym-web-app-chart/charts/frontend/values.yaml
+          git commit -m "Update backend and frontend image tags to ${{ github.run_id }}"
+          git push
